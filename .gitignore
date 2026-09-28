@@ -1,0 +1,27 @@
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+# --- Android / Gradle 本地产物 ---
+.gradle/
+.idea/
+local.properties
+*.iml
+captures/
+**/build/
+.cxx/
+*.jks
+*.keystore
+
+# --- 各类 AI 工具链配置（本机环境，不随仓库提交） ---
+.agents/
+.claude/
+.cline/
+.codebuddy/
+.continue/
+.junie/
+.kiro/
+.mcp.json
+opencode.json
+skills-lock.json
+# 构建产物/发行包（可再生成，不入库）
+dist/

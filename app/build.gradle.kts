@@ -75,21 +75,13 @@ dependencies {
     implementation("androidx.compose.ui:ui:1.7.8")
     implementation("androidx.compose.runtime:runtime:1.7.8")
 
-    implementation("org.lwjgl:lwjgl-vulkan:3.3.1")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.0.0")
-    implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("com.jakewharton.timber:timber:5.0.1")
     implementation("com.squareup.leakcanary:leakcanary-android:2.14")
-    // OpenCV for Optical Flow
-    implementation("org.opencv:opencv:4.9.0")
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
 
-    // TensorFlow Lite for Deep Learning Interpolation
-    implementation("org.tensorflow:tensorflow-lite:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
-    implementation(libs.filament.android)
     implementation(libs.androidx.work.runtime.ktx)
 
     testImplementation("junit:junit:4.13.2")

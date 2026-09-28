@@ -11,7 +11,6 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
-import android.view.MotionEvent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -37,15 +36,9 @@ class MainActivity : ComponentActivity() {
     private var mediaProjectionData: Intent? = null
     private var selectedFrameRate = 120 // 默认帧率
     private var selectedMethod = "默认模式（小白推荐）"
-    private var selectedWeapon = "M416"
     private var enableFrameBoost by mutableStateOf(false)
     private var enableLowEndFrameBoost by mutableStateOf(false)
-    private var enableAutoRecoil by mutableStateOf(false)
     private var enableFloatingWindow by mutableStateOf(false)
-    private var lastX = 0f
-    private var lastY = 0f
-    private var isFiring = false
-    private var anchorPoint: android.graphics.Point? = null
     private val receivers = mutableListOf<BroadcastReceiver>()
     private val TAG = "MainActivity"
 
@@ -101,7 +94,6 @@ class MainActivity : ComponentActivity() {
         }
 
         registerReceiverSafely(fpsUpdateReceiver, IntentFilter("com.example.tfgy999.FPS_UPDATE"))
-        registerReceiverSafely(recoilStateReceiver, IntentFilter("com.example.tfgy999.RECOIL_STATE_UPDATE"))
         Log.i(TAG, "MainActivity创建完成，广播接收器注册")
     }
 
@@ -165,56 +157,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // 自动压枪状态接收器
-    private val recoilStateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            enableAutoRecoil = intent?.getBooleanExtra("enableAutoRecoil", false) ?: false
-            Log.i(TAG, "收到自动压枪状态更新: $enableAutoRecoil")
-        }
-    }
-
-    // 处理触摸事件
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!enableAutoRecoil) return super.onTouchEvent(event)
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                isFiring = true
-                anchorPoint = android.graphics.Point(event.x.toInt(), event.y.toInt())
-                lastX = event.x
-                lastY = event.y
-                updateFiringState()
-            }
-            MotionEvent.ACTION_MOVE -> {
-                val deltaX = event.x - lastX
-                val deltaY = event.y - lastY
-                lastX = event.x
-                lastY = event.y
-                updateFiringState(deltaX, deltaY)
-            }
-            MotionEvent.ACTION_UP -> {
-                isFiring = false
-                anchorPoint = null
-                updateFiringState()
-            }
-        }
-        return super.onTouchEvent(event)
-    }
-
-    // 更新触控状态
-    private fun updateFiringState(userX: Float = 0f, userY: Float = 0f) {
-        if (!enableAutoRecoil) return
-        val intent = Intent(this, AutoRecoilService::class.java).apply {
-            action = "UPDATE_FIRING_STATE"
-            putExtra("isFiring", isFiring)
-            putExtra("anchorX", anchorPoint?.x ?: 0)
-            putExtra("anchorY", anchorPoint?.y ?: 0)
-            putExtra("userX", userX)
-            putExtra("userY", userY)
-        }
-        startServiceCompat(intent)
-        Log.i(TAG, "发送触控更新: isFiring=$isFiring, anchor=($anchorPoint), userX=$userX, userY=$userY")
-    }
-
     // 启动相关服务
     private fun startServices() {
         if (mediaProjectionResultCode == null || mediaProjectionData == null) return
@@ -230,15 +172,6 @@ class MainActivity : ComponentActivity() {
             }
             startServiceCompat(intent)
             Log.i(TAG, "启动听风独家屏幕实时插帧")
-        }
-        if (enableAutoRecoil) {
-            val intent = Intent(this, AutoRecoilService::class.java).apply {
-                putExtra("resultCode", mediaProjectionResultCode)
-                putExtra("data", mediaProjectionData)
-                putExtra("enableAutoRecoil", true)
-            }
-            startServiceCompat(intent)
-            Log.i(TAG, "启动自动压枪（无障碍未优化）")
         }
     }
 
@@ -290,20 +223,17 @@ class MainActivity : ComponentActivity() {
     fun FrameBoostScreen() {
         var isServiceRunning by remember {
             mutableStateOf(
-                isServiceRunning(AutoFrameBoostService::class.java) ||
-                        isServiceRunning(AutoRecoilService::class.java)
+                isServiceRunning(AutoFrameBoostService::class.java)
             )
         }
         var frameRateExpanded by remember { mutableStateOf(false) }
         var methodExpanded by remember { mutableStateOf(false) }
-        var weaponExpanded by remember { mutableStateOf(false) }
         val frameRateOptions = listOf(60, 90, 120, 144)
         val interpolationMethods = listOf(
             "默认模式（小白推荐）",
             "光流辅助插值（实验中）",
             "简单帧混合（实验中）"
         )
-        val weaponOptions = listOf("AKM", "M416", "SCAR-L", "M762", "Groza", "UMP45", "Vector", "Thompson")
         val scope = rememberCoroutineScope()
         var showDialog by remember { mutableStateOf(false) }
         var dialogTitle by remember { mutableStateOf("") }
@@ -426,61 +356,18 @@ class MainActivity : ComponentActivity() {
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("启用自动压枪（无障碍未优化）", fontSize = 16.sp)
-                Spacer(modifier = Modifier.width(8.dp))
-                Switch(
-                    checked = enableAutoRecoil,
-                    onCheckedChange = { enable ->
-                        scope.launch {
-                            enableAutoRecoil = enable
-                        }
-                    }
-                )
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-
-            if (enableAutoRecoil) {
-                Box {
-                    OutlinedButton(onClick = { weaponExpanded = true }) {
-                        Text("当前武器: $selectedWeapon")
-                    }
-                    DropdownMenu(
-                        expanded = weaponExpanded,
-                        onDismissRequest = { weaponExpanded = false }
-                    ) {
-                        weaponOptions.forEach { weapon ->
-                            DropdownMenuItem(
-                                text = { Text(weapon) },
-                                onClick = {
-                                    selectedWeapon = weapon
-                                    weaponExpanded = false
-                                    val intent = Intent(this@MainActivity, AutoRecoilService::class.java).apply {
-                                        action = "SET_WEAPON"
-                                        putExtra("weapon", selectedWeapon)
-                                    }
-                                    startServiceCompat(intent)
-                                }
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-
             Button(
                 onClick = {
                     scope.launch {
                         if (isServiceRunning) {
                             stopService(Intent(this@MainActivity, AutoFrameBoostService::class.java))
-                            stopService(Intent(this@MainActivity, AutoRecoilService::class.java))
                             stopFloatingWindowService()
                             isServiceRunning = false
                             mediaProjectionResultCode = null
                             mediaProjectionData = null
                             Toast.makeText(this@MainActivity, "服务已停止", Toast.LENGTH_SHORT).show()
                             Log.i(TAG, "所有服务已停止")
-                        } else if (enableFrameBoost || enableLowEndFrameBoost || enableAutoRecoil) {
+                        } else if (enableFrameBoost || enableLowEndFrameBoost) {
                             val intent = mediaProjectionManager.createScreenCaptureIntent()
                             screenCaptureLauncher.launch(intent)
                             isServiceRunning = true

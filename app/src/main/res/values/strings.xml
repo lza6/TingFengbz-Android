@@ -3,5 +3,4 @@
     <string name="简单混合">简单混合</string>
     <string name="光流估计">光流估计</string>
     <string name="帧复制">帧复制</string>
-    <string name="accessibility_service_description" />
 </resources>

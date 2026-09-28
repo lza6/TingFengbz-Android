@@ -3,7 +3,6 @@ package com.example.tfgy999
 import android.opengl.GLES20
 import android.os.Handler
 import android.os.HandlerThread
-import android.util.LruCache
 import android.view.Choreographer
 import timber.log.Timber
 import java.lang.ref.WeakReference
@@ -41,7 +40,6 @@ class FrameInterpolator(
     private var droppedFrames = 0L
     private val textureUploadThread = HandlerThread("TextureUploadThread", android.os.Process.THREAD_PRIORITY_DISPLAY).apply { start() }
     private val textureUploadHandler = Handler(textureUploadThread.looper)
-    private val texturePool = LruCache<Int, Int>(3)
     private var frameCount = 0
     private var frameIntervalMs = (1000f / screenRefreshRate).toLong()
     private val renderLock = Any()
@@ -89,7 +87,6 @@ class FrameInterpolator(
             buffer.clear()
             onBufferReleased(buffer)
         }
-        texturePool.evictAll()
         handler.post {
             if (interpolationProgram != 0) {
                 GLES20.glDeleteProgram(interpolationProgram)
@@ -165,7 +162,6 @@ class FrameInterpolator(
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, nextTextureId)
             buffer.rewind()
             GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer)
-            texturePool.put(frameCount, nextTextureId)
         }
     }
 

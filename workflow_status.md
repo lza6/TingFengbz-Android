@@ -79,7 +79,19 @@ P-0 事实基础 ──▶ P-1 反向审计 ──▶ P-2 深度扫描(3子代�
 | F6 | 目标帧率被服务架空 | ✅ service+interpolator 尊重用户选择 |
 | F7-F10 | 死代码清理 | ✅ 删 19 文件+7 依赖+catalog+CMake |
 | F11 | README 如实化 | ✅ 重写完毕 |
-| — | CMake 移除（中文路径可构建？） | ⏳ 后台 assembleDebug 验证中 |
+| — | CMake 移除（中文路径可构建？） | ✅ 已确证：assembleDebug/Release 成功 9m8s |
+| F12 | DisplayListener 对称注销 | ✅ |
+| F13 | 一键启动 UX（自动开开关） | ✅ E2E 实况：直接弹授权框 |
+| B1 | 幂等短路（重复 onStartCommand 防资源叠加） | ✅ 编译+单测 |
+| B2 | 死纹理池 texturePool 移除（只写不读） | ✅ 编译+单测 |
+| B3 | VBO ID 连续假设修正（texVboId 单独保存/删除） | ✅ 编译+单测 |
+| B4 | 停止后通知残留 → cancel | ✅ 编译+单测 |
+| B5 | scope 未 cancel → onDestroy 取消 | ✅ 编译+单测 |
+
+### 子代理 A/B/C 处置记录
+- A（需求/功能）：P0-1 已披露待产品决策；幽灵广播/假设置等已修（F1-F14）。
+- B（生命周期/并发）：可修项全部落实（见 B1-B5 + F12）；结构性 GL 跨线程与 P0-1 同源已披露；并发竞争（drain/renderFrame）已由上传线程 FIFO 归还缓解 + 外层 try/catch 兜底，记录为已知边界。
+- C（质量/测试/安全）：未报告新增阻塞项（死代码/依赖/安全已由 F7-F10 覆盖；本仓库以 lint 0 error + 单测 10/10 佐证）。
 
 ## 阻塞项
 

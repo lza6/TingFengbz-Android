@@ -25,6 +25,7 @@ import androidx.core.app.ServiceCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -63,6 +64,7 @@ class AutoFrameBoostService : Service() {
 
     private var programHandle = 0
     private var vboId = 0
+    private var texVboId = 0
     private lateinit var vertexBuffer: FloatBuffer
     private lateinit var texCoordBuffer: FloatBuffer
     private val shaderCache = mutableMapOf<String, Int>()
@@ -123,6 +125,14 @@ class AutoFrameBoostService : Service() {
             startForeground(NOTIFICATION_ID, notificationBuilder.build())
         }
         Timber.i("前台服务启动，通知ID: $NOTIFICATION_ID")
+
+        // 幂等短路：服务已在运行且持有 MediaProjection 时，仅刷新帧率/通知，不叠加资源
+        if (isRunning.get() && mediaProjection != null) {
+            intent?.getIntExtra("targetFrameRate", targetFrameRate)?.let { targetFrameRate = it.coerceIn(24, 240) }
+            updateNotification(buildNotificationText())
+            Timber.i("服务已在运行，跳过重复初始化（重复 onStartCommand）")
+            return START_NOT_STICKY
+        }
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AutoFrameBoost:WakeLock").apply { acquire() }
@@ -465,7 +475,7 @@ class AutoFrameBoostService : Service() {
         val vboIds = IntArray(2)
         GLES20.glGenBuffers(2, vboIds, 0)
         vboId = vboIds[0]
-        val texVboId = vboIds[1]
+        texVboId = vboIds[1]
 
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vboId)
         vertexBuffer.rewind()
@@ -566,7 +576,8 @@ class AutoFrameBoostService : Service() {
         renderHandler.post {
             eglLock.lock()
             try {
-                GLES20.glDeleteBuffers(2, intArrayOf(vboId, vboId + 1), 0)
+                GLES20.glDeleteBuffers(1, intArrayOf(vboId), 0)
+                GLES20.glDeleteBuffers(1, intArrayOf(texVboId), 0)
                 GLES20.glDeleteTextures(2, intArrayOf(textureId, fboTextureId), 0)
                 GLES20.glDeleteFramebuffers(1, intArrayOf(fboId), 0)
                 GLES20.glDeleteProgram(programHandle)
@@ -581,7 +592,9 @@ class AutoFrameBoostService : Service() {
             }
         }
         renderThread.quitSafely()
-        updateNotification("服务已停止")
+        // 停止服务后取消常驻通知，避免“服务已停止”残留通知栏
+        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        scope.cancel()
         Timber.i("服务销毁完成")
     }
 

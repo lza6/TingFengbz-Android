@@ -71,3 +71,17 @@
   - ✅ F3 通知权限请求框弹出；F14 一键启动自动开开关并弹出 MediaProjection 授权框
   - ⚠️ **服务运行时链路（MediaProjection→ImageReader→GL→FPS 广播）未在模拟器完全验证**：Android 14+ 模拟器 MediaProjection 进入单应用选择器 + 软渲染 GL 极慢（Choreographer 跳帧 1000+，Davey 18s）；授权后服务建立管线需要真机验证。**这是环境限制，非代码缺陷**。
 - **下次提示**：改动影响 `FrameInterpolator`/`AutoFrameBoostService`/权限/Manifest 后，需重跑模拟器 E2E（AVD `tfgy_e2e` 存在，AOT 后可复用）。服务运行时链路建议在真机 `adb install` 后验证。
+
+## 2026-09-28 深夜 — 子代理 B/C 发现处置批次
+
+### 变更
+- **幂等短路**：`AutoFrameBoostService.onStartCommand` 服务已运行且持 MediaProjection 时仅刷新通知返回，防止重复 start 叠加 wakeLock/VirtualDisplay/Timer/Choreographer（B P1-2）。
+- **死纹理池移除**：`FrameInterpolator.texturePool`（LruCache）只 `put` 从不 `get` → GL 纹理泄漏；移除字段/put/evictAll/import（B P1-3 附属）。
+- **VBO ID 连续假设修正**：`initVbo` 保存 `texVboId`，onDestroy 分别 `glDeleteBuffers`（原 `vboId+1` 非 GL 规范，可能删错对象）（B P2-12）。
+- **通知残留**：onDestroy 改为 `NotificationManager.cancel`，不再遗留"服务已停止"常驻通知（B P2-11）。
+- **scope 取消**：onDestroy 末尾 `scope.cancel()`（补充 import kotlinx.coroutines.cancel）（B P2-9）。
+- **DisplayListener 注销**：F12（B P1-1）。
+
+### 验证
+- `compileDebugKotlin + testDebugUnitTest` ✅ BUILD SUCCESSFUL（2 次，首轮仅缺 cancel import 已补）
+- **下次提示**：涉及 FrameInterpolator 停止路径/服务资源释放时，重点回归：快速启停、重复 onStartCommand。

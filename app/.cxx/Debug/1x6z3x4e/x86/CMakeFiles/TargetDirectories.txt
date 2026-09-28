@@ -1,3 +1,0 @@
-C:/Users/Administrator/AndroidStudioProjects/TFGY999/app/.cxx/Debug/1x6z3x4e/x86/CMakeFiles/directbuf.dir
-C:/Users/Administrator/AndroidStudioProjects/TFGY999/app/.cxx/Debug/1x6z3x4e/x86/CMakeFiles/edit_cache.dir
-C:/Users/Administrator/AndroidStudioProjects/TFGY999/app/.cxx/Debug/1x6z3x4e/x86/CMakeFiles/rebuild_cache.dir

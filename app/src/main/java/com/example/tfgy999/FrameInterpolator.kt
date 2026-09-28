@@ -293,16 +293,8 @@ class FrameInterpolator(
     fun updateScreenRefreshRate(newRefreshRate: Float) {
         screenRefreshRate = newRefreshRate
         frameIntervalMs = (1000f / screenRefreshRate).toLong()
-        targetFrameRate = calculateTargetFrameRate()
+        // 目标帧率尊重用户选择（构造函数传入），刷新率变化仅调整帧间隔
         Timber.i("屏幕刷新率更新: $screenRefreshRate, 目标帧率: $targetFrameRate, 每帧间隔: $frameIntervalMs ms")
-    }
-
-    private fun calculateTargetFrameRate(): Int {
-        return when {
-            screenRefreshRate <= 60f -> 75
-            screenRefreshRate <= 90f -> 120
-            else -> 144
-        }
     }
 
     private fun initInterpolationShader() {

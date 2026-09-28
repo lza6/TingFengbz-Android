@@ -3,6 +3,7 @@
 
 # --- Android / Gradle 本地产物 ---
 .gradle/
+.kotlin/
 .idea/
 local.properties
 *.iml

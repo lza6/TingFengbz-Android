@@ -35,10 +35,9 @@ class MainActivity : ComponentActivity() {
     private var mediaProjectionResultCode: Int? = null
     private var mediaProjectionData: Intent? = null
     private var selectedFrameRate = 120 // 默认帧率
-    private var selectedMethod = "默认模式（小白推荐）"
     private var enableFrameBoost by mutableStateOf(false)
-    private var enableLowEndFrameBoost by mutableStateOf(false)
     private var enableFloatingWindow by mutableStateOf(false)
+    private var isServiceRunningState by mutableStateOf(false)
     private val receivers = mutableListOf<BroadcastReceiver>()
     private val TAG = "MainActivity"
 
@@ -49,20 +48,26 @@ class MainActivity : ComponentActivity() {
         const val REQUEST_CODE_SCREEN_CAPTURE = 102
     }
 
-    // 所需运行时权限（屏幕捕获经 MediaProjection 单独请求；CAMERA/存储权限无使用，已移除）
-    private val requiredPermissions = arrayOf(
-        android.Manifest.permission.WAKE_LOCK
-    )
+    // 所需运行时权限（屏幕捕获经 MediaProjection 单独请求；Android 13+ 通知权限保证前台服务通知可见）
+    private val requiredPermissions: Array<String> = buildList {
+        add(android.Manifest.permission.WAKE_LOCK)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            add(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }.toTypedArray()
 
     // 屏幕捕获权限请求
     private val screenCaptureLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK && result.data != null) {
             mediaProjectionResultCode = result.resultCode
             mediaProjectionData = result.data
+            isServiceRunningState = true
             startServices()
             Toast.makeText(this, "服务已启动", Toast.LENGTH_SHORT).show()
             Log.i(TAG, "屏幕捕获权限授予，服务启动")
         } else {
+            // 授权失败必须复位状态，避免按钮卡在“停止服务”
+            isServiceRunningState = false
             Log.w(TAG, "屏幕捕获权限被拒绝")
             Toast.makeText(this, "屏幕捕获权限被拒绝", Toast.LENGTH_SHORT).show()
         }
@@ -91,6 +96,7 @@ class MainActivity : ComponentActivity() {
             FrameBoostScreen()
         }
 
+        isServiceRunningState = isServiceRunning(AutoFrameBoostService::class.java)
         registerReceiverSafely(fpsUpdateReceiver, IntentFilter("com.example.tfgy999.FPS_UPDATE"))
         Log.i(TAG, "MainActivity创建完成，广播接收器注册")
     }
@@ -165,11 +171,10 @@ class MainActivity : ComponentActivity() {
                 putExtra("resultCode", mediaProjectionResultCode)
                 putExtra("data", mediaProjectionData)
                 putExtra("targetFrameRate", frameRate)
-                putExtra("interpolationMethod", selectedMethod)
                 putExtra("enableFrameBoost", true)
             }
             startServiceCompat(intent)
-            Log.i(TAG, "启动听风独家屏幕实时插帧")
+            Log.i(TAG, "启动屏幕实时插帧服务")
         }
     }
 
@@ -219,23 +224,11 @@ class MainActivity : ComponentActivity() {
     // 主界面
     @Composable
     fun FrameBoostScreen() {
-        var isServiceRunning by remember {
-            mutableStateOf(
-                isServiceRunning(AutoFrameBoostService::class.java)
-            )
-        }
+        // 服务运行状态由类级 State 驱动（授权回调/停止按钮可更新）
+        val isServiceRunning = isServiceRunningState
         var frameRateExpanded by remember { mutableStateOf(false) }
-        var methodExpanded by remember { mutableStateOf(false) }
         val frameRateOptions = listOf(60, 90, 120, 144)
-        val interpolationMethods = listOf(
-            "默认模式（小白推荐）",
-            "光流辅助插值（实验中）",
-            "简单帧混合（实验中）"
-        )
         val scope = rememberCoroutineScope()
-        var showDialog by remember { mutableStateOf(false) }
-        var dialogTitle by remember { mutableStateOf("") }
-        var dialogMessage by remember { mutableStateOf("") }
         var enableHistoryDisplay by remember { mutableStateOf(false) } // 默认关闭
 
         Column(
@@ -259,13 +252,7 @@ class MainActivity : ComponentActivity() {
                 Spacer(modifier = Modifier.width(8.dp))
                 Switch(
                     checked = enableFrameBoost,
-                    onCheckedChange = { enable ->
-                        if (enable && enableLowEndFrameBoost) {
-                            Toast.makeText(this@MainActivity, "不能同时开启高端和中低端插帧补帧", Toast.LENGTH_SHORT).show()
-                        } else {
-                            enableFrameBoost = enable
-                        }
-                    }
+                    onCheckedChange = { enable -> enableFrameBoost = enable }
                 )
             }
             Spacer(modifier = Modifier.height(16.dp))
@@ -310,7 +297,7 @@ class MainActivity : ComponentActivity() {
             )
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (enableFrameBoost || enableLowEndFrameBoost) {
+            if (enableFrameBoost) {
                 Box {
                     OutlinedButton(onClick = { frameRateExpanded = true }) {
                         Text("目标帧率: $selectedFrameRate FPS")
@@ -331,27 +318,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-
-                Box {
-                    OutlinedButton(onClick = { methodExpanded = true }) {
-                        Text("插帧方法: ${selectedMethod.take(10)}...")
-                    }
-                    DropdownMenu(
-                        expanded = methodExpanded,
-                        onDismissRequest = { methodExpanded = false }
-                    ) {
-                        interpolationMethods.forEach { method ->
-                            DropdownMenuItem(
-                                text = { Text(method) },
-                                onClick = {
-                                    selectedMethod = method
-                                    methodExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(16.dp))
             }
 
             Button(
@@ -360,19 +326,16 @@ class MainActivity : ComponentActivity() {
                         if (isServiceRunning) {
                             stopService(Intent(this@MainActivity, AutoFrameBoostService::class.java))
                             stopFloatingWindowService()
-                            isServiceRunning = false
+                            isServiceRunningState = false
                             mediaProjectionResultCode = null
                             mediaProjectionData = null
                             Toast.makeText(this@MainActivity, "服务已停止", Toast.LENGTH_SHORT).show()
                             Log.i(TAG, "所有服务已停止")
-                        } else if (enableFrameBoost || enableLowEndFrameBoost) {
+                        } else {
+                            // 一键启动：新用户首次点击自动开启补帧开关，避免被“请先开启开关”拦截
+                            if (!enableFrameBoost) enableFrameBoost = true
                             val intent = mediaProjectionManager.createScreenCaptureIntent()
                             screenCaptureLauncher.launch(intent)
-                            isServiceRunning = true
-                        } else {
-                            dialogTitle = "提示"
-                            dialogMessage = "请至少启用一项功能"
-                            showDialog = true
                         }
                     }
                 },
@@ -382,30 +345,20 @@ class MainActivity : ComponentActivity() {
             }
             Spacer(modifier = Modifier.height(16.dp))
 
-            // “查看历史补帧插帧记录”按钮
-            Button(
-                onClick = {
-                    val intent = Intent(this@MainActivity, HistoryActivity::class.java)
-                    startActivity(intent)
-                    Log.i(TAG, "跳转到历史记录页面")
-                },
-                modifier = Modifier.fillMaxWidth(0.8f)
-            ) {
-                Text("查看历史补帧插帧记录", fontSize = 18.sp)
+            // “查看历史补帧插帧记录”按钮（由开关真实控制）
+            if (enableHistoryDisplay) {
+                Button(
+                    onClick = {
+                        val intent = Intent(this@MainActivity, HistoryActivity::class.java)
+                        startActivity(intent)
+                        Log.i(TAG, "跳转到历史记录页面")
+                    },
+                    modifier = Modifier.fillMaxWidth(0.8f)
+                ) {
+                    Text("查看历史补帧插帧记录", fontSize = 18.sp)
+                }
             }
 
-            if (showDialog) {
-                AlertDialog(
-                    onDismissRequest = { showDialog = false },
-                    title = { Text(dialogTitle) },
-                    text = { Text(dialogMessage) },
-                    confirmButton = {
-                        Button(onClick = { showDialog = false }) {
-                            Text("确定")
-                        }
-                    }
-                )
-            }
         }
     }
 }

@@ -5,7 +5,6 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    kotlin("kapt")
 }
 
 // 签名配置：keystore.properties 不入库；缺失时 release 退化为 unsigned
@@ -26,11 +25,6 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        externalNativeBuild {
-            cmake {
-                cppFlags += "-std=c++11"
-            }
-        }
     }
 
     signingConfigs {
@@ -67,12 +61,6 @@ android {
         compose = true
     }
 
-    // JNI 支持
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-        }
-    }
     packaging {
         resources {
             pickFirsts.add("META-INF/INDEX.LIST")
@@ -82,18 +70,15 @@ android {
 
 dependencies {
     implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
-    implementation("androidx.room:room-runtime:2.6.1")
-    kapt("androidx.room:room-compiler:2.6.1")
     implementation("androidx.core:core:1.15.0")
     implementation("androidx.navigation:navigation-fragment-ktx:2.8.9")
     implementation("androidx.navigation:navigation-ui-ktx:2.8.9")
+    // HistoryActivity 文件列表
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
     // MPAndroidChart图表库
     implementation(libs.mpandroidchart)
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
 
     implementation("androidx.compose.material3:material3:1.3.1")
-    implementation("androidx.activity:activity-compose:1.8.0")
     implementation("androidx.compose.ui:ui:1.7.8")
     implementation("androidx.compose.runtime:runtime:1.7.8")
 
@@ -101,8 +86,6 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:2.0.0")
     implementation("com.jakewharton.timber:timber:5.0.1")
-
-    implementation(libs.androidx.work.runtime.ktx)
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

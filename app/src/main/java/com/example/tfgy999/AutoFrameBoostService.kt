@@ -48,6 +48,7 @@ class AutoFrameBoostService : Service() {
     private var frameWidth = 0
     private var frameHeight = 0
     private var wakeLock: PowerManager.WakeLock? = null
+    private var displayListener: DisplayManager.DisplayListener? = null
 
     private var sharedEglDisplay: EGLDisplay? = null
     private var sharedEglContext: EGLContext? = null
@@ -158,12 +159,14 @@ class AutoFrameBoostService : Service() {
 
         val display = getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
         screenRefreshRate = display.mode.refreshRate
-        targetFrameRate = calculateTargetFrameRate(screenRefreshRate, targetFrameRate)
+        // F6: 尊重用户所选目标帧率（此前按刷新率硬编码覆盖，选择无效）；clamp 到服务可行区间
+        targetFrameRate = targetFrameRate.coerceIn(24, 240)
+        Timber.i("目标帧率采用用户选择: $targetFrameRate (屏幕刷新率 $screenRefreshRate)")
 
         startTime = System.currentTimeMillis()
 
         val displayManager = getSystemService(DisplayManager::class.java)
-        displayManager.registerDisplayListener(object : DisplayManager.DisplayListener {
+        displayListener = object : DisplayManager.DisplayListener {
             override fun onDisplayAdded(displayId: Int) {}
             override fun onDisplayRemoved(displayId: Int) {}
             override fun onDisplayChanged(displayId: Int) {
@@ -173,7 +176,8 @@ class AutoFrameBoostService : Service() {
                     Timber.i("屏幕刷新率变更: $newRefreshRate")
                 }
             }
-        }, null)
+        }
+        displayManager.registerDisplayListener(displayListener, null)
 
         Choreographer.getInstance().postFrameCallback(object : Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
@@ -212,14 +216,6 @@ class AutoFrameBoostService : Service() {
         }
 
         return START_STICKY
-    }
-
-    private fun calculateTargetFrameRate(refreshRate: Float, selectedRate: Int): Int {
-        return when {
-            refreshRate <= 60f -> 75
-            refreshRate <= 90f -> 120
-            else -> 144
-        }
     }
 
     private fun startFrameDataCollection() {
@@ -562,6 +558,10 @@ class AutoFrameBoostService : Service() {
         imageReader?.close()
         mediaProjection?.stop()
         wakeLock?.release()
+        displayListener?.let {
+            getSystemService(DisplayManager::class.java).unregisterDisplayListener(it)
+            displayListener = null
+        }
 
         renderHandler.post {
             eglLock.lock()
@@ -669,10 +669,18 @@ class AutoFrameBoostService : Service() {
     fun getProgramHandle(): Int = programHandle
 
     fun updateFloatingWindow(fps: Int, interpolatedFrames: Int) {
+        if (fps <= 0) return
         val intent = Intent(FLOATING_WINDOW_UPDATE_ACTION)
         intent.putExtra("fps", fps.toFloat())
         intent.putExtra("interpolatedFrames", interpolatedFrames)
         intent.putExtra("status", "运行中")
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+
+        // P0-2: 此前 FPS_UPDATE 只有接收方无发送方（幽灵广播），这里真实发送，供悬浮窗/统计消费
+        val fpsUpdate = Intent("com.example.tfgy999.FPS_UPDATE")
+        fpsUpdate.putExtra("capturedFps", fps.toFloat())
+        fpsUpdate.putExtra("interpolatedFps", interpolatedFrames.toFloat())
+        fpsUpdate.putExtra("totalFps", (fps + interpolatedFrames).toFloat())
+        sendBroadcast(fpsUpdate)
     }
 }

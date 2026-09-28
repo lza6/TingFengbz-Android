@@ -71,6 +71,8 @@ class AutoFrameBoostService : Service() {
 
     private val scope = CoroutineScope(Dispatchers.Default)
     private lateinit var frameDataFile: File
+    private val frameDataEntries = ArrayDeque<JSONObject>()
+    private var frameDataTick = 0
     private var frameDataTimer: Timer? = null
     private var startTime: Long = 0L
     private var lastChoreographerTime = 0L
@@ -80,6 +82,9 @@ class AutoFrameBoostService : Service() {
         const val NOTIFICATION_ID = 1
         const val NOTIFICATION_CHANNEL_ID = "AutoFrameBoostChannel"
         const val FLOATING_WINDOW_UPDATE_ACTION = "com.example.tfgy999.FLOATING_WINDOW_UPDATE"
+        // T4: 帧数据历史上限（1 小时 @ 1Hz）与落盘间隔，防止文件无限增长 + 每秒全量重写
+        const val MAX_FRAME_DATA_ENTRIES = 3600
+        const val FRAME_DATA_FLUSH_SECONDS = 60
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -188,7 +193,13 @@ class AutoFrameBoostService : Service() {
         renderHandler.post {
             try {
                 initRenderOpenGL()
-                frameInterpolator = FrameInterpolator(screenRefreshRate, targetFrameRate, renderHandler, WeakReference(this))
+                frameInterpolator = FrameInterpolator(
+                    screenRefreshRate,
+                    targetFrameRate,
+                    renderHandler,
+                    WeakReference(this),
+                    onBufferReleased = { buffer -> DirectBufferPool.release(buffer) }
+                )
                 setupImageReader()
                 virtualDisplay = createVirtualDisplay() ?: throw RuntimeException("VirtualDisplay创建失败")
                 frameInterpolator?.startInterpolation()
@@ -220,34 +231,35 @@ class AutoFrameBoostService : Service() {
                     val originalFps = frameInterpolator?.currentFps ?: 0
                     val interpolatedFps = frameInterpolator?.currentInterpolatedFrames ?: 0
                     scope.launch(Dispatchers.IO) {
-                        writeFrameDataToFile(currentTime, originalFps, interpolatedFps)
+                        appendFrameData(currentTime, originalFps, interpolatedFps)
                     }
                 }
             }, 0, 1000)
         }
     }
 
-    private fun writeFrameDataToFile(timestamp: Long, originalFps: Number, interpolatedFps: Number) {
-        val jsonArray = try {
-            if (frameDataFile.exists()) JSONArray(frameDataFile.readText()) else JSONArray()
-        } catch (e: Exception) {
-            Timber.e(e, "读取现有JSON文件失败，创建新数组")
-            JSONArray()
-        }
-
-        val jsonObject = JSONObject().apply {
+    @Synchronized
+    private fun appendFrameData(timestamp: Long, originalFps: Number, interpolatedFps: Number) {
+        frameDataEntries.addLast(JSONObject().apply {
             put("timestamp", timestamp)
             put("originalFps", originalFps)
             put("interpolatedFps", interpolatedFps)
-        }
-        jsonArray.put(jsonObject)
+        })
+        if (frameDataEntries.size > MAX_FRAME_DATA_ENTRIES) frameDataEntries.removeFirst()
+        // 按固定间隔落盘，避免每秒全量重写整个 JSON 文件（原实现为 O(n²)）
+        if (++frameDataTick % FRAME_DATA_FLUSH_SECONDS == 0) flushFrameData()
+    }
 
+    @Synchronized
+    private fun flushFrameData() {
+        val jsonArray = JSONArray()
+        frameDataEntries.forEach { jsonArray.put(it) }
         try {
             FileOutputStream(frameDataFile).use { fos ->
                 fos.write(jsonArray.toString().toByteArray())
                 fos.flush()
             }
-            Timber.i("帧数据写入成功，时间戳: $timestamp")
+            Timber.i("帧数据写入成功，记录数: ${frameDataEntries.size}")
         } catch (e: Exception) {
             Timber.e(e, "写入JSON文件失败")
         }
@@ -293,12 +305,31 @@ class AutoFrameBoostService : Service() {
         val buffer = planes[0].buffer
         val width = image.width
         val height = image.height
+        val rowStride = planes[0].rowStride
+        val pixelStride = planes[0].pixelStride
         val requiredSize = width * height * 4
 
-        val outputBuffer = ByteBuffer.allocateDirect(requiredSize)
+        // T2: 优先从 DirectBufferPool 复用帧缓冲区，避免每帧 8MB+ 的直接内存申请/回收
+        val outputBuffer = DirectBufferPool.acquire(requiredSize)
+            ?: ByteBuffer.allocateDirect(requiredSize).order(ByteOrder.nativeOrder())
+
         buffer.rewind()
-        if (buffer.remaining() > outputBuffer.remaining()) return null
-        outputBuffer.put(buffer)
+        if (rowStride == width * pixelStride) {
+            // 无行填充：整块拷贝（常见路径）
+            if (buffer.remaining() > outputBuffer.remaining()) {
+                DirectBufferPool.release(outputBuffer)
+                return null
+            }
+            outputBuffer.put(buffer)
+        } else {
+            // T3: 某些设备 RGBA_8888 平面存在行填充（rowStride > width*4）。
+            // 原先整块拷贝会因剩余字节超限而整帧丢弃；改为按行拷贝并跳过填充字节。
+            val copiedRows = copyFrameRows(buffer, outputBuffer, width, height, pixelStride, rowStride)
+            if (copiedRows != height) {
+                DirectBufferPool.release(outputBuffer)
+                return null
+            }
+        }
         outputBuffer.rewind()
         return outputBuffer
     }
@@ -519,14 +550,18 @@ class AutoFrameBoostService : Service() {
         super.onDestroy()
         isRunning.set(false)
         frameDataTimer?.cancel()
+        // 停止前尽力落盘帧数据历史（HistoryActivity 依赖此文件展示图表）
+        scope.launch(Dispatchers.IO) { flushFrameData() }
 
+        // T1: 先清空渲染线程上的回调，再让 FrameInterpolator 发布其 GL 资源清理。
+        // 原顺序会导致下方 post 的清理被 removeCallbacksAndMessages 从队列中移除，
+        // 使插值 program/纹理/FBO 每次启动停止循环后泄漏。
+        renderHandler.removeCallbacksAndMessages(null)
         frameInterpolator?.stopInterpolation()
         virtualDisplay?.release()
         imageReader?.close()
         mediaProjection?.stop()
         wakeLock?.release()
-
-        renderHandler.removeCallbacksAndMessages(null)
 
         renderHandler.post {
             eglLock.lock()

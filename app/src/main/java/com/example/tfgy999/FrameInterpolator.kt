@@ -17,7 +17,8 @@ class FrameInterpolator(
     private var screenRefreshRate: Float,
     private var targetFrameRate: Int,
     private val handler: Handler,
-    private val serviceRef: WeakReference<AutoFrameBoostService>
+    private val serviceRef: WeakReference<AutoFrameBoostService>,
+    private val onBufferReleased: (ByteBuffer) -> Unit = {}
 ) {
     private val isRunning = AtomicBoolean(false)
     private val isStopped = AtomicBoolean(false)
@@ -81,8 +82,13 @@ class FrameInterpolator(
         isStopped.set(true)
         handler.removeCallbacksAndMessages(null)
         textureUploadHandler.removeCallbacksAndMessages(null)
-        frameQueue.forEach { it.first.rewind(); it.first.clear() }
-        frameQueue.clear()
+        // 归还所有仍在队列中的帧缓冲区，避免内存泄漏
+        while (frameQueue.isNotEmpty()) {
+            val (buffer, _) = frameQueue.removeFirst()
+            buffer.rewind()
+            buffer.clear()
+            onBufferReleased(buffer)
+        }
         texturePool.evictAll()
         handler.post {
             if (interpolationProgram != 0) {
@@ -110,13 +116,17 @@ class FrameInterpolator(
         if (buffer == null || isStopped.get()) {
             buffer?.rewind()
             buffer?.clear()
+            // isStopped 分支同样归还池化缓冲区，避免池容量缩水
+            buffer?.let { onBufferReleased(it) }
             return
         }
+        var enqueued = false
         try {
             val requiredSize = frameWidth * frameHeight * 4
             if (buffer.capacity() < requiredSize) {
                 buffer.rewind()
                 buffer.clear()
+                onBufferReleased(buffer)
                 Timber.w("缓冲区容量不足，已释放，所需: $requiredSize, 实际: ${buffer.capacity()}")
                 return
             }
@@ -127,11 +137,15 @@ class FrameInterpolator(
             }
             val currentTime = System.nanoTime()
             frameQueue.addLast(Pair(buffer, currentTime))
+            enqueued = true
             originalFrameCount++
             while (frameQueue.size > maxQueueSize) {
                 val oldFrame = frameQueue.removeFirst()
                 oldFrame.first.rewind()
                 oldFrame.first.clear()
+                // 归还投递到上传线程 FIFO 执行：保证该缓冲的 GL 上传（含渲染期重传）全部
+                // 执行完毕后才回池，避免复用竞态导致错帧（审查 HIGH-1）
+                textureUploadHandler.post { onBufferReleased(oldFrame.first) }
             }
             frameCount++
             preloadNextFrame(buffer)
@@ -140,6 +154,8 @@ class FrameInterpolator(
             Timber.e(e, "处理帧缓冲区失败")
             buffer.rewind()
             buffer.clear()
+            // 仅归还“尚未入队”的缓冲区，避免与队列 drain/淘汰路径重复归还同一实例（审查#6）
+            if (!enqueued) onBufferReleased(buffer)
         }
     }
 

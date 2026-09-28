@@ -25,3 +25,6 @@ opencode.json
 skills-lock.json
 # 构建产物/发行包（可再生成，不入库）
 dist/
+
+# 签名口令（含敏感信息，严禁入库）
+keystore.properties

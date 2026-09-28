@@ -49,10 +49,8 @@ class MainActivity : ComponentActivity() {
         const val REQUEST_CODE_SCREEN_CAPTURE = 102
     }
 
-    // 所需权限列表
+    // 所需运行时权限（屏幕捕获经 MediaProjection 单独请求；CAMERA/存储权限无使用，已移除）
     private val requiredPermissions = arrayOf(
-        android.Manifest.permission.CAMERA,
-        android.Manifest.permission.READ_EXTERNAL_STORAGE,
         android.Manifest.permission.WAKE_LOCK
     )
 

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>听风插帧 · 终局审计变更报告</title>
+<style>
+  :root { --accent:#0b5adf; --ok:#178a2e; --warn:#b8860b; --err:#b00020; --bg:#f7f9fc; --card:#ffffff; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); margin:0; color:#1c2733; line-height:1.7; }
+  .wrap { max-width:920px; margin:0 auto; padding:24px 20px 60px; }
+  header { text-align:center; padding:36px 0 12px; }
+  header h1 { margin:0 0 8px; font-size:28px; }
+  header .sub { color:#5a6b7a; font-size:15px; }
+  .badges { margin:14px 0 6px; }
+  .badge { display:inline-block; padding:3px 12px; border-radius:999px; font-size:13px; margin:0 4px 4px 0; }
+  .b-green { background:#e3f6e8; color:var(--ok); } .b-blue { background:#e4eefd; color:var(--accent); }
+  .b-yellow { background:#fdf3dd; color:var(--warn); } .b-red { background:#fde8ea; color:var(--err); }
+  h2 { font-size:20px; margin:34px 0 12px; padding-bottom:8px; border-bottom:2px solid #e2e8f0; }
+  h3 { font-size:16px; margin:20px 0 8px; }
+  .card { background:var(--card); border:1px solid #e5ebf2; border-radius:12px; padding:16px 18px; margin:12px 0; box-shadow:0 1px 3px rgba(16,24,40,.05); }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin:10px 0; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid #eef2f7; vertical-align:top; }
+  th { background:#f1f5fa; color:#334; }
+  code { background:#eef2f7; padding:1px 6px; border-radius:4px; font-size:13px; font-family:Consolas,monospace; }
+  .ok { color:var(--ok); font-weight:600; } .warn { color:var(--warn); font-weight:600; } .err { color:var(--err); font-weight:600; }
+  .note { background:#fff8e6; border-left:4px solid var(--warn); padding:10px 14px; border-radius:0 8px 8px 0; margin:10px 0; }
+  .quiz { background:#fff; border:1px solid #e5ebf2; border-radius:12px; padding:18px; }
+  .quiz ol { padding-left:22px; }
+  .quiz li { margin:10px 0; }
+  .opt { display:block; padding:2px 0; }
+  footer { text-align:center; color:#8b9aa8; font-size:13px; margin-top:40px; }
+  details { margin:6px 0; }
+  summary { cursor:pointer; color:var(--accent); font-weight:600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>听风插帧（TingFengbz-Android）终局审计变更报告</h1>
+  <div class="sub">TFGY999 · Android 屏幕捕获 + 实时帧插值处理 · 版本 1.0 → 审计加固</div>
+  <div class="badges">
+    <span class="badge b-green">构建通过</span><span class="badge b-green">单测 10/10</span>
+    <span class="badge b-green">lint 0 error</span><span class="badge b-blue">E2E 部分通过</span>
+    <span class="badge b-blue">中文路径可构建</span><span class="badge b-yellow">P0-1 待决策</span>
+  </div>
+</header>
+
+<h2>1. 上下文（Context）</h2>
+<div class="card">
+<p>本仓库是一个 <b>Android 全局屏幕补帧 App</b>：用 MediaProjection 捕获屏幕，逐帧做插值处理，并提供悬浮窗帧率统计。此前已历经：自动压枪外挂移除 → v1.0.0 发布（Release 188.7MB→33.2MB、LeakCanary 启动 ANR 修复、DirectBufferPool 内存池接线、GL 资源泄漏修复、依赖瘦身）→ 本次<b>终局闭环总审计</b>。</p>
+<p>本次审计的触发：用户要求以"即将交付的真实产品"视角做全链路盲点扫描，消灭伪实现/半成品/幽灵链路，补齐生命周期、权限、文档、记忆、报告，并沉淀可复用工作流。</p>
+</div>
+
+<h2>2. 关键发现（直觉 / Findings）</h2>
+<div class="card">
+<h3>🔴 P0-1 核心能力边界（平台约束，待产品决策）</h3>
+<p>插值结果被渲染到<b>离屏 FBO/PBuffer</b>，全仓库没有任何 SurfaceView/Presentation 把插值画面回投到真实屏幕。非 Root 下 Android 不允许把改写画面覆盖到其他应用的显示层——这是<b>平台硬约束</b>而非单纯漏写。当前刷新屏幕上看不到插值画面，只能看到统计数字。已如实写入 README「能力边界」，两个候选方向（悬浮窗回投 / 保持监控统计定位）留待用户拍板，<b>不擅自大改核心渲染架构</b>。</p>
+<h3>发现并修复的真实问题</h3>
+<table>
+<tr><th>#</th><th>问题</th><th>影响</th><th>处置</th></tr>
+<tr><td>1</td><td><code>FPS_UPDATE</code> 幽灵广播（两个界面注册、全仓无发送方）</td><td>FPS 显示/测试统计永远不触发</td><td class="ok">服务真实发送 ✅</td></tr>
+<tr><td>2</td><td><code>DisplayListener</code> 只注册不注销</td><td>服务销毁后整服务被系统持有 → 内存泄漏</td><td class="ok">onDestroy 对称注销 ✅</td></tr>
+<tr><td>3</td><td>"插帧方法/目标帧率"假设置</td><td>用户选择无效（服务端忽略/覆盖）</td><td class="ok">删假方法下拉 + 帧率尊重用户 ✅</td></tr>
+<tr><td>4</td><td>通知权限（POST_NOTIFICATIONS）声明但从不请求</td><td>Android 13+ 前台服务通知不可见</td><td class="ok">运行时请求 ✅（E2E 实况弹出）</td></tr>
+<tr><td>5</td><td><code>enableLowEndFrameBoost</code> 幽灵开关 + 历史按钮假开关</td><td>功能无法开启 / 开关无效果</td><td class="ok">移除 + 真实控制 ✅</td></tr>
+<tr><td>6</td><td>死代码 19 文件（占位 MotionEstimator/不可达 TestActivity/孤立骨架类/Room 空转层/桩 Worker）</td><td>维护负担 + 误导（README 宣称"金字塔运动估算"实为占位）</td><td class="ok">清理 + 依赖同步 ✅</td></tr>
+<tr><td>7</td><td>CMake/原生模块从未接线（directbuf 编译未 load、neon 未编译）且致<b>中文路径无法构建</b></td><td>构建瓶颈 + 死原生代码</td><td class="ok">整体移除 → 中文路径构建成功 ✅</td></tr>
+<tr><td>8</td><td>新用户首次点"启动服务"被"请至少启用一项功能"拦截</td><td>UX 卡点</td><td class="ok">一键启动自动开开关 ✅</td></tr>
+</table>
+<h3>README 技术宣称 vs 实现（已修正）</h3>
+<p class="note">原先 README 宣称金字塔运动估算 / NEON 优化 / Kalman 融合 / mmap 内存池 / OpenCV / TFLite / Vulkan —— 经核实全部未实现或已移除。README 已重写为如实版本。</p>
+</div>
+
+<h2>3. 做了什么（What Was Done）</h2>
+<div class="card">
+<table>
+<tr><th>批次</th><th>内容</th><th>验证</th></tr>
+<tr><td>F1</td><td>FPS_UPDATE 真实广播接线（服务→界面）</td><td>编译+单测 ✅</td></tr>
+<tr><td>F2</td><td>授权拒绝后 UI 状态复位（不再卡"停止服务"）</td><td>编译 ✅</td></tr>
+<tr><td>F3</td><td>POST_NOTIFICATIONS 运行时请求</td><td class="ok">E2E 实况：授权框弹出 ✅</td></tr>
+<tr><td>F4/F5</td><td>幽灵开关清理；历史按钮受开关控制</td><td class="ok">E2E：默认隐藏 ✅</td></tr>
+<tr><td>F6</td><td>目标帧率尊重用户选择（service+interpolator 双层）</td><td>编译 ✅</td></tr>
+<tr><td>F7-F10</td><td>死代码清理（19 文件）+ 依赖清理（room/work/kapt/重复版本/死 catalog）+ 显式 recyclerview</td><td>编译+单测 ✅</td></tr>
+<tr><td>F11</td><td>移除 CMake/原生模块</td><td class="ok">中文路径构建 9m8s ✅</td></tr>
+<tr><td>F12</td><td>DisplayListener 对称注销</td><td>编译 ✅</td></tr>
+<tr><td>F13</td><td>README/CLAUDE.md 如实化（含 P0-1 能力边界）</td><td>文档 ✅</td></tr>
+<tr><td>F14</td><td>一键启动（首次点击自动开开关）</td><td class="ok">E2E：直接弹授权框 ✅</td></tr>
+<tr><td>资产</td><td>.specify 宪法/spec/plan/tasks、workflow_status.md、VERIFICATION-LOG.md</td><td>文档 ✅</td></tr>
+</table>
+<h3>验证证据</h3>
+<ul>
+<li><code>./gradlew :app:testDebugUnitTest</code> ✅ 10/10（池复用、行拷贝、边界）</li>
+<li><code>./gradlew assembleDebug assembleRelease</code> ✅ 中文路径 9m8s（Debug 36.4MB / Release 32.8MB signed）</li>
+<li><code>./gradlew :app:lintDebug</code> ✅ 0 error / 72 warning（P3 级）</li>
+<li>模拟器 E2E ✅：安装、启动、UI 前台渲染、通知权限框、一键启动授权框；<span class="warn">服务运行时链路（MediaProjection→GL→FPS 广播）受模拟器 MediaProjection 单应用选择器 + 软渲染极慢限制，判定需真机验证</span></li>
+</ul>
+</div>
+
+<h2>4. 诚实边界（未尽事项）</h2>
+<div class="card">
+<ul>
+<li><b class="warn">P0-1</b>：插值画面未回投真实屏幕（平台约束）。方向 A/B 待你决策——这是唯一"待用户拍板"项。</li>
+<li><b class="warn">服务运行时链路</b>：真机验证（`adb install` + 授权后观察悬浮窗 FPS）。模拟器无法完整验证，未伪造通过。</li>
+<li><b>独立审查子代理 B/C</b>（生命周期/并发、质量/测试/安全）已启动超时未返回，本轮以其发现的部分已由主控交叉核验覆盖；若后续返回将增量合并。</li>
+<li><b>P3 建议</b>：ABI 拆分、minify 启用前补 keep 规则、LogNotTimber 风格统一、UI 文案版本号对齐。</li>
+</ul>
+</div>
+
+<h2>5. 关于变更的测验（Quiz）</h2>
+<div class="quiz">
+<p>阅读完报告后，请作答以确认理解。答案见文末折叠区。</p>
+<ol>
+<li><b>P0-1 是什么？为什么它不是普通 bug？</b><span class="opt">A) 插值画面没回投屏幕，属平台硬约束，需产品决策 | B) 一个渲染 bug，修一行即可 | C) MediaProjection 权限问题</span></li>
+<li><b>幽灵广播指什么？</b><span class="opt">A) 广播注册了但无发送方，永远不会触发 | B) 网络广播被劫持 | C) 广播发送频率过高</span></li>
+<li><b>本次删除了多少死代码文件？</b><span class="opt">A) 5 | B) 14 | C) 19</span></li>
+<li><b>为什么移除 CMake 原生模块后中文路径能构建了？</b><span class="opt">A) 因为移除了导致 JSON 崩溃的 CMake 路径处理 | B) 因为更新了 JDK | C) 因为加了编译缓存</span></li>
+<li><b>F6 修复了什么？</b><span class="opt">A) 目标帧率被服务按刷新率覆盖，改为尊重用户选择 | B) 修复了悬浮窗 FPS 显示 | C) 修复了崩溃</span></li>
+<li><b>Android 13+ 前台服务通知不可见的原因与修复？</b><span class="opt">A) 缺少 POST_NOTIFICATIONS 运行时请求，已加入 | B) 通知渠道未建 | C) 通知 ID 冲突</span></li>
+<li><b>F14 一键启动解决了什么 UX 卡点？</b><span class="opt">A) 首次点启动服务被"请至少启用一项功能"拦截，现自动开开关 | B) 启动速度慢 | C) 按钮位置不对</span></li>
+<li><b>README 为什么被重写？</b><span class="opt">A) 原宣称（金字塔/NEON/mmap/OpenCV 等）与实现不符，须如实 | B) 排版不好看 | C) 版权问题</span></li>
+<li><b>服务运行时链路为何需真机验证？</b><span class="opt">A) 模拟器 MediaProjection 单应用选择器 + 软渲染极慢，无法代表真机 | B) 真机比模拟器更快 | C) 代码有 bug</span></li>
+<li><b>本次审计沉淀了哪些可复用资产？</b><span class="opt">A) .specify 宪法/spec/plan/tasks + workflow_status + VERIFICATION-LOG | B) 只有代码 | C) 只有 README</span></li>
+</ol>
+<details><summary>查看答案</summary><p>1-A · 2-A · 3-C · 4-A · 5-A · 6-A · 7-A · 8-A · 9-A · 10-A</p></details>
+</div>
+
+<footer>听风插帧 · 终局闭环总审计报告 · 生成于 2026-09-28</footer>
+</div>
+</body>
+</html>
